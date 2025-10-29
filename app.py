@@ -56,6 +56,11 @@ def evaluate():
         print("✅ OpenAI response received successfully.")
         return jsonify({"feedback": feedback})
 
-    except Exception as e:
-        print("❌ Error:", e)
-        return jsonify({"error": str(e)}), 500
+except Exception as e:
+    if "insufficient_quota" in str(e):
+        return jsonify({
+            "feedback": "⚠️ The AI feedback service is temporarily unavailable (usage limit reached). Please try again later."
+        }), 200
+    return jsonify({"error": str(e)}), 500
+
+

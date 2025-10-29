@@ -8,7 +8,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Initialize OpenAI client using environment variable
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+client = OpenAI(api_key=os.environ.get("is_api_key"))
 
 @app.route("/")
 def home():
@@ -43,3 +43,4 @@ def evaluate():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+

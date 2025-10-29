@@ -1,45 +1,46 @@
+from openai import OpenAI
+import base64
 from flask import Flask, request, jsonify
-import base64, openai, os
 from flask_cors import CORS
+import os
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Get your OpenAI API key from Render later
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+@app.route("/")
+def home():
+    return "Impulse Sim AI Feedback API is running! Use /evaluate to submit an image."
 
 @app.route("/evaluate", methods=["POST"])
 def evaluate():
-    # Get uploaded image
-    image = request.files["file"]
-    image_b64 = base64.b64encode(image.read()).decode("utf-8")
+    if 'file' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
 
-    # What the AI should do
-    system_prompt = """
-    You are a UK clinical skills educator assessing basic suturing technique.
-    Evaluate the uploaded photo for spacing, tension, knot security, and wound edge alignment.
-    Return feedback in this structure:
-    Score (1–10)
-    Summary (1 line)
-    Strengths (2–3 bullets)
-    Areas for improvement (2–3 bullets)
-    Next steps (short actionable advice)
-    Use British-English spelling.
-    """
+    file = request.files['file']
+    image_b64 = base64.b64encode(file.read()).decode('utf-8')
 
-    # Send to OpenAI
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",  # supports image input
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": [
-                {"type": "image_url", "image_url": f"data:image/jpeg;base64,{image_b64}"}
-            ]}
-        ]
-    )
+    system_prompt = """You are a clinical educator. 
+    Evaluate the suturing technique shown in the uploaded image.
+    Consider spacing, tension, knot security, and wound edge alignment.
+    Give a score (1–10) and 2–3 constructive improvement suggestions."""
 
-    # Return the feedback as JSON
-    return jsonify({"feedback": response["choices"][0]["message"]["content"]})
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": [
+                    {"type": "input_text", "text": "Analyse this suture pad photo:"},
+                    {"type": "input_image", "image_url": f"data:image/jpeg;base64,{image_b64}"}
+                ]}
+            ]
+        )
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+        feedback = response.choices[0].message.content[0].text
+        return jsonify({"feedback": feedback})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+

@@ -62,7 +62,7 @@ def evaluate():
 
         if "insufficient_quota" in error_str or "You exceeded your current quota" in error_str:
             return jsonify({
-                "feedback": "⚠️ The AI feedback service is temporarily unavailable (OpenAI usage limit reached). Please try again later."
+                "feedback": "⚠️ AI feedback service is temporarily unavailable (usage limit reached). Please try again later."
             }), 200
 
         elif "invalid_request_error" in error_str:
@@ -72,6 +72,7 @@ def evaluate():
 
         else:
             return jsonify({"error": error_str}), 500
+
 
 
 

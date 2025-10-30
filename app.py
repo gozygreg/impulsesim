@@ -5,7 +5,8 @@ import base64
 import os
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+# Only allow requests from your GoDaddy domain
+CORS(app, resources={r"/evaluate": {"origins": "https://impulsesim.com"}})
 
 # Use your Render variable (is_api_key) instead of default
 client = OpenAI(api_key=os.environ.get("is_api_key"))
@@ -72,6 +73,7 @@ def evaluate():
 
         else:
             return jsonify({"error": error_str}), 500
+
 
 
 

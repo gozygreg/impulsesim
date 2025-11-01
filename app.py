@@ -41,11 +41,15 @@ def evaluate():
                     "role": "user",
                     "content": [
                         {"type": "text", "text": "Evaluate this suture pad photo:"},
-                        {"type": "image_url", "image_url": f"data:image/jpeg;base64,{image_b64}"}
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
+                        }
                     ]
                 }
             ]
         )
+
 
         # Handle new response format safely
         feedback = (
@@ -73,6 +77,7 @@ def evaluate():
 
         else:
             return jsonify({"error": error_str}), 500
+
 
 
 

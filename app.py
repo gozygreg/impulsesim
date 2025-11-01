@@ -33,6 +33,9 @@ def evaluate():
             "Provide a score (1–10) and 2–3 constructive improvement suggestions."
         )
 
+        # Detect file type from MIME (e.g. image/jpeg, image/png)
+        mime_type = file.mimetype or "image/jpeg"
+
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -43,7 +46,7 @@ def evaluate():
                         {"type": "text", "text": "Evaluate this suture pad photo:"},
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
+                            "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}
                         }
                     ]
                 }
@@ -77,6 +80,7 @@ def evaluate():
 
         else:
             return jsonify({"error": error_str}), 500
+
 
 
 

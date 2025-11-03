@@ -102,5 +102,41 @@ def verify_code():
     else:
         return jsonify({"valid": False})
 
+@app.route("/register-code", methods=["POST"])
+def register_code():
+    import json
+    try:
+        data = request.json
+        email = data.get("email")
+        code = data.get("code")
+        plan = data.get("plan", "AI_Feedback_10uploads")
+
+        if not email or not code:
+            return jsonify({"error": "Missing email or code"}), 400
+
+        # Create codes.json file if it doesn’t exist
+        if not os.path.exists("codes.json"):
+            with open("codes.json", "w") as f:
+                json.dump({}, f)
+
+        # Load existing codes
+        with open("codes.json", "r") as f:
+            codes = json.load(f)
+
+        # Save new code entry
+        codes[code] = {"uses_left": 10, "email": email, "plan": plan}
+
+        with open("codes.json", "w") as f:
+            json.dump(codes, f, indent=2)
+
+        print(f"✅ Registered code {code} for {email}")
+        return jsonify({"status": "success", "code": code, "email": email}), 200
+
+    except Exception as e:
+        print("❌ Error in /register-code:", e)
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+

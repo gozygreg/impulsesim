@@ -1,20 +1,19 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from openai import OpenAI
-import base64
-import os
+import base64, os, json
 
 app = Flask(__name__)
-# Only allow requests from your GoDaddy domain
-CORS(app, resources={r"/evaluate": {"origins": "https://impulsesim.com"}})
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Use your Render variable (is_api_key) instead of default
 client = OpenAI(api_key=os.environ.get("is_api_key"))
+CODES_FILE = "codes.json"
 
 @app.route("/")
 def home():
-    return "Impulse Sim AI Feedback API is running! Use /evaluate to submit an image."
+    return "Impulse Sim AI Feedback API is running with Pay-Per-Use enabled!"
 
+# --- AI FEEDBACK ---
 @app.route("/evaluate", methods=["POST"])
 def evaluate():
     try:
@@ -23,18 +22,13 @@ def evaluate():
 
         file = request.files['file']
         image_b64 = base64.b64encode(file.read()).decode('utf-8')
-
-        # Log for debugging (shows in Render logs)
-        print("✅ Image received, sending to OpenAI...")
+        mime_type = file.mimetype or "image/jpeg"
 
         system_prompt = (
             "You are a clinical educator analysing a student's suturing technique. "
             "Evaluate spacing, tension, knot security, and wound edge alignment. "
             "Provide a score (1–10) and 2–3 constructive improvement suggestions."
         )
-
-        # Detect file type from MIME (e.g. image/jpeg, image/png)
-        mime_type = file.mimetype or "image/jpeg"
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -53,38 +47,60 @@ def evaluate():
             ]
         )
 
-
-        # Handle new response format safely
         feedback = (
             response.choices[0].message.content[0].text
             if isinstance(response.choices[0].message.content, list)
             else response.choices[0].message.content
         )
-
-        print("✅ OpenAI response received successfully.")
         return jsonify({"feedback": feedback})
 
     except Exception as e:
-        error_str = str(e)
-        print("❌ Error caught:", error_str)
-
-        if "insufficient_quota" in error_str or "You exceeded your current quota" in error_str:
-            return jsonify({
-                "feedback": "⚠️ AI feedback service is temporarily unavailable (usage limit reached). Please try again later."
-            }), 200
-
-        elif "invalid_request_error" in error_str:
-            return jsonify({
-                "feedback": "⚠️ Invalid request. Please ensure your image file is a valid JPEG or PNG."
-            }), 200
-
-        else:
-            return jsonify({"error": error_str}), 500
+        return jsonify({"error": str(e)}), 500
 
 
+# --- NEW: Add a Code (Zapier will POST here) ---
+@app.route("/add_code", methods=["POST"])
+def add_code():
+    data = request.get_json()
+    code = data["code"].upper()
+    uses = int(data.get("uses", 10))  # default 10 uses
+    email = data.get("email", "")
+
+    if os.path.exists(CODES_FILE):
+        with open(CODES_FILE, "r") as f:
+            codes = json.load(f)
+    else:
+        codes = {}
+
+    codes[code] = {"uses_left": uses, "email": email}
+
+    with open(CODES_FILE, "w") as f:
+        json.dump(codes, f)
+
+    return jsonify({"success": True})
 
 
+# --- NEW: Verify a Code (Frontend will call this before showing upload form) ---
+@app.route("/verify", methods=["POST"])
+def verify_code():
+    data = request.get_json()
+    code = data.get("code", "").strip().upper()
 
+    if not os.path.exists(CODES_FILE):
+        return jsonify({"valid": False})
 
+    with open(CODES_FILE, "r") as f:
+        codes = json.load(f)
 
+    record = codes.get(code)
+    if record and record["uses_left"] > 0:
+        record["uses_left"] -= 1
+        codes[code] = record
+        with open(CODES_FILE, "w") as f:
+            json.dump(codes, f)
+        return jsonify({"valid": True, "uses_left": record["uses_left"]})
+    else:
+        return jsonify({"valid": False})
 
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)

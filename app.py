@@ -92,6 +92,14 @@ def verify_code():
     with open(CODES_FILE, "r") as f:
         codes = json.load(f)
 
+    # ✅ OWNER OVERRIDE CODE (always valid, unlimited use)
+    OWNER_CODE = "IMP-ADMIN-ACCESS"
+
+    # If owner code entered, always allow access
+    if code == OWNER_CODE:
+        return jsonify({"valid": True, "uses_left": "∞"})
+
+    # Otherwise check normal user codes
     record = codes.get(code)
     if record and record["uses_left"] > 0:
         record["uses_left"] -= 1
@@ -101,6 +109,7 @@ def verify_code():
         return jsonify({"valid": True, "uses_left": record["uses_left"]})
     else:
         return jsonify({"valid": False})
+    
 
 @app.route("/register-code", methods=["POST"])
 def register_code():
@@ -139,4 +148,5 @@ def register_code():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 

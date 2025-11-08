@@ -1,59 +1,45 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from openai import OpenAI
-from datetime import datetime
+import base64, os, json, uuid
 from io import BytesIO
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.units import inch
-import base64, os, json
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 client = OpenAI(api_key=os.environ.get("is_api_key"))
 
 CODES_FILE = "codes.json"
-LOG_FILE = "feedback_history.json"
+FEEDBACK_FILE = "feedback_history.json"
 
-
-# ---------------------- UTILITIES ----------------------
-def load_json(file):
-    if os.path.exists(file):
-        with open(file, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_json(file, data):
-    with open(file, "w") as f:
-        json.dump(data, f, indent=2)
-
-
+# -------------------------------------------------------------------------
 @app.route("/")
 def home():
-    return "Impulse Sim AI Feedback API v3 — OPATS rubric + progress log + PDF export."
+    return "✅ Impulse Sim AI Feedback API is running with pay-per-use + logging + PDF enabled!"
 
 
-# ---------------------- EVALUATE IMAGE ----------------------
+# -------------------------------------------------------------------------
+# 🧠 1. Evaluate uploaded suture photo
 @app.route("/evaluate", methods=["POST"])
 def evaluate():
     try:
-        if "file" not in request.files:
+        if 'file' not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
 
-        file = request.files["file"]
-        image_b64 = base64.b64encode(file.read()).decode("utf-8")
+        file = request.files['file']
+        image_b64 = base64.b64encode(file.read()).decode('utf-8')
         mime_type = file.mimetype or "image/jpeg"
 
         system_prompt = (
-            "You are a clinical educator assessing a learner’s suturing technique. "
-            "Use an OSATS-style framework (adapted to Impulse Sim OPATS). "
-            "Evaluate the following domains and give each a score out of 10: "
-            "1. Wound Edge Approximation, 2. Suture Spacing & Symmetry, 3. Tension & Knot Security, "
-            "4. Tissue Handling, 5. Aesthetic Outcome, 6. Global Impression. "
-            "Then provide a concise summary and 2–3 improvement suggestions."
+            "You are a clinical educator evaluating a learner's suturing technique "
+            "based on a photo. Analyse wound edge approximation, suture spacing and symmetry, "
+            "tension and knot appearance, tissue handling, and aesthetic outcome. "
+            "Provide a structured assessment with scores (1–10 per domain), a global impression, "
+            "a concise summary, and 2–3 improvement suggestions. "
+            "Format response clearly for direct display (avoid markdown symbols like ** or ###)."
         )
 
         response = client.chat.completions.create(
@@ -63,51 +49,77 @@ def evaluate():
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Evaluate this suture pad image:"},
-                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}}
+                        {"type": "text", "text": "Evaluate this suturing photo objectively:"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}
+                        }
                     ]
-                },
-            ],
+                }
+            ]
         )
 
-        feedback = response.choices[0].message.content
+        feedback = (
+            response.choices[0].message.content[0].text
+            if isinstance(response.choices[0].message.content, list)
+            else response.choices[0].message.content
+        )
 
-        # Save feedback in log file
-        log = load_json(LOG_FILE)
-        entry_id = str(len(log) + 1)
-        log[entry_id] = {
-            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-            "feedback": feedback,
-        }
-        save_json(LOG_FILE, log)
+        # ✅ Generate unique feedback ID
+        entry_id = str(uuid.uuid4())[:8]
 
+        # ✅ Log feedback in history file
+        log_entry = {"id": entry_id, "feedback": feedback}
+        with open(FEEDBACK_FILE, "a") as log:
+            json.dump(log_entry, log)
+            log.write("\n")
+
+        # ✅ Return feedback + ID for frontend
         return jsonify({"feedback": feedback, "entry_id": entry_id})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# ---------------------- ADD CODE ----------------------
+# -------------------------------------------------------------------------
+# 🧩 2. Add a code (Zapier hook)
 @app.route("/add_code", methods=["POST"])
 def add_code():
     data = request.get_json()
     code = data["code"].upper()
     uses = int(data.get("uses", 10))
     email = data.get("email", "")
-    codes = load_json(CODES_FILE)
+
+    if os.path.exists(CODES_FILE):
+        with open(CODES_FILE, "r") as f:
+            codes = json.load(f)
+    else:
+        codes = {}
+
     codes[code] = {"uses_left": uses, "email": email}
-    save_json(CODES_FILE, codes)
+
+    with open(CODES_FILE, "w") as f:
+        json.dump(codes, f)
+
     return jsonify({"success": True})
 
 
-# ---------------------- VERIFY CODE ----------------------
+# -------------------------------------------------------------------------
+# ✅ 3. Verify a code before upload
 @app.route("/verify", methods=["POST"])
 def verify_code():
     data = request.get_json()
     code = data.get("code", "").strip().upper()
-    codes = load_json(CODES_FILE)
+
+    if not os.path.exists(CODES_FILE):
+        return jsonify({"valid": False})
+
+    with open(CODES_FILE, "r") as f:
+        codes = json.load(f)
 
     OWNER_CODE = "IMP-ADMIN-ACCESS"
+
+    # Owner always valid
     if code == OWNER_CODE:
         return jsonify({"valid": True, "uses_left": "∞"})
 
@@ -115,76 +127,84 @@ def verify_code():
     if record and record["uses_left"] > 0:
         record["uses_left"] -= 1
         codes[code] = record
-        save_json(CODES_FILE, codes)
+        with open(CODES_FILE, "w") as f:
+            json.dump(codes, f)
         return jsonify({"valid": True, "uses_left": record["uses_left"]})
     else:
         return jsonify({"valid": False})
 
 
-# ---------------------- DOWNLOAD FEEDBACK PDF ----------------------
+# -------------------------------------------------------------------------
+# 🧾 4. Register new code manually (if needed)
+@app.route("/register-code", methods=["POST"])
+def register_code():
+    try:
+        data = request.json
+        email = data.get("email")
+        code = data.get("code")
+        plan = data.get("plan", "AI_Feedback_10uploads")
+
+        if not email or not code:
+            return jsonify({"error": "Missing email or code"}), 400
+
+        if not os.path.exists(CODES_FILE):
+            with open(CODES_FILE, "w") as f:
+                json.dump({}, f)
+
+        with open(CODES_FILE, "r") as f:
+            codes = json.load(f)
+
+        codes[code] = {"uses_left": 10, "email": email, "plan": plan}
+
+        with open(CODES_FILE, "w") as f:
+            json.dump(codes, f, indent=2)
+
+        print(f"✅ Registered code {code} for {email}")
+        return jsonify({"status": "success", "code": code, "email": email}), 200
+
+    except Exception as e:
+        print("❌ Error in /register-code:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+# -------------------------------------------------------------------------
+# 📄 5. Download feedback as PDF by entry ID
 @app.route("/download_feedback/<entry_id>", methods=["GET"])
 def download_feedback(entry_id):
-    log = load_json(LOG_FILE)
-    entry = log.get(entry_id)
-    if not entry:
-        return jsonify({"error": "No such feedback entry"}), 404
-
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4,
-                            rightMargin=40, leftMargin=40,
-                            topMargin=60, bottomMargin=40)
-    styles = getSampleStyleSheet()
-    story = []
-
-    # Header
-    logo_url = "https://img1.wsimg.com/isteam/ip/8aaa8186-6e53-4a39-9191-17ebbbb58eca/logo-horizontal-transparent.png"
     try:
-        story.append(Image(logo_url, width=180, height=50))
-    except Exception:
-        pass
+        # Search in feedback_history.jsonl
+        if not os.path.exists(FEEDBACK_FILE):
+            return jsonify({"error": "No feedback history found"}), 404
 
-    story.append(Spacer(1, 12))
-    story.append(Paragraph("<b>AI Feedback Summary</b>", styles["Title"]))
-    story.append(Paragraph(f"Date: {entry['timestamp']}", styles["Normal"]))
-    story.append(Spacer(1, 15))
+        feedback_text = None
+        with open(FEEDBACK_FILE, "r") as log:
+            for line in log:
+                try:
+                    record = json.loads(line.strip())
+                    if record["id"] == entry_id:
+                        feedback_text = record["feedback"]
+                        break
+                except json.JSONDecodeError:
+                    continue
 
-    feedback = entry["feedback"]
-    rubric_data = [["Domain", "Score (/10)"]]
-    for line in feedback.split("\n"):
-        if ":" in line and "/" in line:
-            parts = line.split(":")
-            rubric_data.append([parts[0].strip(), parts[1].strip()])
+        if not feedback_text:
+            return jsonify({"error": "Feedback not found"}), 404
 
-    if len(rubric_data) > 1:
-        table = Table(rubric_data, colWidths=[3.5 * inch, 1.3 * inch])
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#007c7e")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("ALIGN", (1, 1), (-1, -1), "CENTER"),
-        ]))
-        story.append(table)
-        story.append(Spacer(1, 15))
+        # Generate PDF dynamically
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        styles = getSampleStyleSheet()
+        story = [Paragraph("<b>Impulse Sim AI Feedback Report</b>", styles["Title"]), Spacer(1, 20)]
+        story.append(Paragraph(feedback_text.replace("\n", "<br/>"), styles["Normal"]))
+        doc.build(story)
 
-    story.append(Paragraph("<b>Summary & Recommendations</b>", styles["Heading3"]))
-    story.append(Paragraph(feedback, styles["Normal"]))
-    story.append(Spacer(1, 30))
+        buffer.seek(0)
+        return send_file(buffer, as_attachment=True, download_name=f"feedback_{entry_id}.pdf", mimetype="application/pdf")
 
-    story.append(Paragraph(
-        "<para align='center'><font color='#007c7e'>© 2025 Impulse Sim | Empowering Clinical Skill Mastery</font></para>",
-        styles["Normal"]
-    ))
-
-    doc.build(story)
-    buffer.seek(0)
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name=f"ImpulseSim_Feedback_{entry_id}.pdf",
-        mimetype="application/pdf"
-    )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
+# -------------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

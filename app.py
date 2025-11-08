@@ -161,7 +161,8 @@ def download_feedback(entry_id):
         story.append(Paragraph("<b>Rubric:</b> OPATS (adapted from OSATS / DOPS / PBA frameworks)", styles["Normal"]))
         story.append(Spacer(1, 15))
 
-        # --- Emphasise scores ---
+        # --- Emphasise titles and scores ---
+        feedback_text = re.sub(r'(?:(?<=\n)|^)([A-Z][A-Za-z &]+):', r'<br/><br/><b>\1:</b>', feedback_text)
         feedback_text = re.sub(r'(\d+)/10', r'<b>\1/10</b>', feedback_text)
         feedback_text = feedback_text.replace("\n", "<br/>")
 
@@ -191,3 +192,4 @@ def download_feedback(entry_id):
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
